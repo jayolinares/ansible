@@ -1,0 +1,69 @@
+---
+
+- hosts: "{{ target }}"
+  gather_facts: no
+  become: yes
+  become_user: root
+  become_method: sudo
+
+  tasks: 
+    - name: Install yum-utils
+      ansible.builtin.dnf: 
+        name: yum-utils
+        state: present 
+
+    - name: Enable CRB (coreready builder)
+      ansible.builtin.shell: dnf config-manager --set-enabled crb
+
+    - name: Enable EPEL repo
+      ansible.builtin.dnf: 
+        name: epel-release
+        state: present 
+
+    - name: Install google-authenticator and other dependencies
+      ansible.builtin.dnf: 
+        name: "{{ item }}"
+        state: present
+      loop:
+        - google-authenticator
+        - qrencode
+        - qrencode-libs
+
+    - name: Set ChallengeResponseAuthentication to yes
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config.d/50-redhat.conf
+        regexp: '^ChallengeResponseAuthentication'
+        line: ChallengeResponseAuthentication yes
+
+    - name: Set pam configs.
+      ansible.builtin.lineinfile:
+        path: /etc/pam.d/sshd 
+        insertafter: 'auth\s+\w+\s+postlogin$'
+        line: 'auth       required     pam_google_authenticator.so secret=${HOME}/.google_authenticator nullok no_increment_hotp'
+
+    - name: Restart sshd.
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: true
+        name: sshd
+
+    - name: Modify the default .bashrc.
+      ansible.builtin.blockinfile:
+        path: /etc/skel/.bashrc 
+        marker: "##### {mark} ANSIBLE MANAGED BLOCK #####"
+        insertbefore: "unset rc"
+        block: |
+          ## If .google_authenticator file is not found (eg. newly created user account), then generate one. 
+          ## The QR code will be shown to the user upon initial login. 
+          if  [ ! -f $HOME/.google_authenticator ];
+          then
+            echo "Enabling MFA for $USER"
+            echo ""
+            /usr/bin/google-authenticator -t -f -d -w 3 -e 5 -r 3 -R 30
+          fi
+
+## Issue with SELinux, fix it with the steps below. Not adding it to the playbook as I can't reproduce the issue. - Jay O. 
+# grep google_authenticator /var/log/audit/audit.log  | audit2allow -m google_auth_2 > google_auth_2.te
+# grep google_authenticator /var/log/audit/audit.log  | audit2allow -M google_auth_2
+# semodule -i google_auth_2.pp
+# semodule --reload
