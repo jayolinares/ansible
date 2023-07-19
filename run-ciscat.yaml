@@ -1,0 +1,52 @@
+---
+
+- hosts: "{{ target }}"
+  gather_facts: true
+  become: yes
+  become_user: root
+  become_method: sudo
+
+  vars:
+    ciscat_bundle: CIS-CAT-Assessor-linux-jre-v4.27.0_withLicense
+  
+  tasks:
+    - name: Copy CIS-CAT bundle
+      ansible.builtin.copy:
+        src: "files/{{ ciscat_bundle }}.zip"
+        dest: "/tmp/{{ ciscat_bundle }}.zip"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install unzip package
+      ansible.builtin.package: 
+        name: unzip
+        state: present
+
+    - name: Unpack the CIS-CAT bundle
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ ciscat_bundle }}.zip"
+        dest: /root/
+        remote_src: yes
+
+    - name: Set the Assessor file to executable
+      ansible.builtin.file:
+        path: "/root/{{ ciscat_bundle }}/Assessor/Assessor-CLI.sh"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Set the Java file to executable
+      ansible.builtin.file:
+        path: "/root/{{ ciscat_bundle }}/Assessor/jre/bin/java"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Add the built-in java to $PATH
+      ansible.builtin.shell: |
+       export JAVA_HOME=/root/{{ ciscat_bundle }}/Assessor/jre/bin/
+       export PATH=$JAVA_HOME:$PATH
+
+    - name: Run CIS-CAT Assessor
+      ansible.builtin.shell: /root/{{ ciscat_bundle }}/Assessor/Assessor-CLI.sh -html -b benchmarks/CIS_Red_Hat_Enterprise_Linux_9_Benchmark_v1.0.0-xccdf.xml
